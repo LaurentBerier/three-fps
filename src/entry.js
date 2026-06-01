@@ -62,6 +62,7 @@ import DirectionDebug from './entities/NPC/DirectionDebug'
 import CharacterCollision from './entities/NPC/CharacterCollision'
 import Hands from './entities/Player/Hands'
 import WeaponManager from './entities/Player/WeaponManager'
+import PlayerBody from './entities/Player/PlayerBody'
 import UIManager from './entities/UI/UIManager'
 import AmmoBox from './entities/AmmoBox/AmmoBox'
 import LevelBulletDecals from './entities/Level/BulletDecals'
@@ -264,6 +265,7 @@ class FPSGameApp{
     playerEntity.SetName("Player");
     playerEntity.AddComponent(new PlayerPhysics(this.physicsWorld, Ammo));
     playerEntity.AddComponent(new PlayerControls(this.camera, this.scene));
+    playerEntity.AddComponent(new PlayerBody(SkeletonUtils.clone(this.assets['mutant']), this.mutantAnims, this.scene, this.camera));
     playerEntity.AddComponent(new Hands(this.camera, this.assets['ak47'].scene));
     playerEntity.AddComponent(new WeaponManager(this.camera, this.physicsWorld, this.assets['muzzleFlash'], this.assets['ak47Shot'], this.listener ));
     playerEntity.AddComponent(new PlayerHealth());
