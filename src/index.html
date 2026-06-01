@@ -25,6 +25,14 @@
         bottom: 5%;
         font-size: 3em;
       }
+      #weapon_name{
+        position: absolute;
+        right: 5%;
+        bottom: 13%;
+        font-size: 1.4em;
+        opacity: 0.85;
+        letter-spacing: 1px;
+      }
       #progress{
         position: absolute;
         bottom: 9%;
@@ -91,6 +99,7 @@
     </div>
     <div id="game_hud">
       <img id="crosshair" src="<%=require('./ui/crosshair.png')%>" />
+      <div id="weapon_name"></div>
       <div id="ammo_container">
         <span id="current_ammo">0</span>
         <span>|</span>

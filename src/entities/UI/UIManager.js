@@ -15,6 +15,10 @@ export default class UIManager extends Component{
         document.getElementById("health_progress").style.width = `${health}%`;
     }
 
+    SetWeaponName(name){
+        document.getElementById("weapon_name").innerText = name;
+    }
+
     Initialize(){
         document.getElementById("game_hud").style.visibility = 'visible';
     }

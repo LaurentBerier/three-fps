@@ -38,6 +38,10 @@ class Input{
         this._addEventListner(document.body, 'mouseup', callback);
     }
 
+    AddMouseWheelListner(callback){
+        this._addEventListner(document, 'wheel', callback);
+    }
+
     _onKeyDown = (event) => {
         this._keyMap[event.code] = 1;
     }

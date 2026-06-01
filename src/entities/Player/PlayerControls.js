@@ -14,10 +14,13 @@ export default class PlayerControls extends Component{
 
         this.timeZeroToMax = 0.08;
 
-        this.maxSpeed = 7.0;
+        this.walkSpeed = 7.0;
+        this.sprintMultiplier = 1.6;
+        this.maxSpeed = this.walkSpeed;
         this.speed = new THREE.Vector3();
-        this.acceleration = this.maxSpeed / this.timeZeroToMax;
+        this.acceleration = this.walkSpeed / this.timeZeroToMax;
         this.decceleration = -7.0;
+        this.isSprinting = false;
 
         this.mouseSpeed = 0.002;
         this.physicsComponent = null;
@@ -103,6 +106,11 @@ export default class PlayerControls extends Component{
         const rightFactor = Input.GetKeyDown("KeyD") - Input.GetKeyDown("KeyA");
         const direction = this.moveDir.set(rightFactor, 0.0, forwardFactor).normalize();
 
+        // Sprint (hold Shift) only kicks in while running forward on the ground.
+        const sprintKey = Input.GetKeyDown("ShiftLeft") || Input.GetKeyDown("ShiftRight");
+        this.isSprinting = !!(sprintKey && Input.GetKeyDown("KeyW") && this.physicsComponent.canJump);
+        this.maxSpeed = this.isSprinting ? this.walkSpeed * this.sprintMultiplier : this.walkSpeed;
+
         const velocity = this.physicsBody.getLinearVelocity();
 
         if(Input.GetKeyDown('Space') && this.physicsComponent.canJump){
@@ -129,6 +137,15 @@ export default class PlayerControls extends Component{
             this.camera.position.set(p.x(), p.y() + this.yOffset, p.z());
             this.parent.SetPosition(this.camera.position);
         }
-        
+
+    }
+
+    // Current horizontal move speed in m/s (used to drive the weapon bob).
+    get HorizontalSpeed(){
+        return this.speed.length();
+    }
+
+    get IsGrounded(){
+        return this.physicsComponent ? this.physicsComponent.canJump : false;
     }
 }

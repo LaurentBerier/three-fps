@@ -1,135 +1,78 @@
 import * as THREE from 'three'
-import Component from '../../Component'
-import Input from '../../Input'
 import {Ammo, AmmoHelper, CollisionFilterGroups} from '../../AmmoLib'
 
-import WeaponFSM from './WeaponFSM';
 
+// A single weapon instance, owned and driven by WeaponManager. The mesh is a
+// SkinnedMesh bound to the arms metarig, so the fire/idle/reload clips animate the
+// weapon's own parts (the magazine drops, the slider racks). Equipping just toggles
+// visibility — swapping weapons shows a different skinned mesh on the same hands.
+export default class Weapon{
+    constructor(name, mesh, config = {}){
+        this.name = name;
+        this.mesh = mesh;
 
-export default class Weapon extends Component{
-    constructor(camera, model, flash, world, shotSoundBuffer, listner){
-        super();
-        this.name = 'Weapon';
-        this.camera = camera;
-        this.world = world;
-        this.model = model;
-        this.flash = flash;
-        this.animations = {};
+        this.fireRate = config.fireRate ?? 0.1;
+        this.damage = config.damage ?? 2;
+        this.ammoPerMag = config.magSize ?? 30;
+        this.magAmmo = this.ammoPerMag;
+        this.ammo = config.ammo ?? 100;
+        // Muzzle-flash anchor in the model-root space (same frame the original AK
+        // used), so the flash sits at the barrel.
+        this.barrelOffset = config.barrelOffset ?? new THREE.Vector3(-0.3, -0.5, 8.3);
+
         this.shoot = false;
-        this.fireRate = 0.1;
         this.shootTimer = 0.0;
-
-        this.shotSoundBuffer = shotSoundBuffer;
-        this.audioListner = listner;
-
-        this.magAmmo = 30;
-        this.ammoPerMag = 30;
-        this.ammo = 100;
-        this.damage = 2;
-        this.uimanager = null;
         this.reloading = false;
         this.hitResult = {intersectionPoint: new THREE.Vector3(), intersectionNormal: new THREE.Vector3()};
 
+        this.mesh.visible = false;
     }
 
-    SetAnim(name, clip){
-        const action = this.mixer.clipAction(clip);
-        this.animations[name] = {clip, action};
+    // Shared dependencies injected by WeaponManager. `root` is the arms model root
+    // the muzzle flash parents to.
+    Init({camera, world, flash, shotSound, uimanager, root}){
+        this.camera = camera;
+        this.world = world;
+        this.flash = flash;
+        this.shotSound = shotSound;
+        this.uimanager = uimanager;
+        this.root = root;
     }
 
-    SetAnimations(){
-        this.mixer = new THREE.AnimationMixer( this.model );
-        this.SetAnim('idle', this.model.animations[1]);
-        this.SetAnim('reload', this.model.animations[2]);
-        this.SetAnim('shoot', this.model.animations[0]);
-    }
+    // ---- Equip / holster ----
+    Attach(){
+        this.mesh.visible = true;
 
-    SetMuzzleFlash(){
-        this.flash.position.set(-0.3, -0.5, 8.3);
+        this.flash.position.copy(this.barrelOffset);
+        this.flash.rotation.set(0, 0, 0);
         this.flash.rotateY(Math.PI);
-        this.model.add(this.flash);
+        this.root.add(this.flash);
         this.flash.life = 0.0;
 
-        this.flash.children[0].material.blending = THREE.AdditiveBlending;
+        this.shoot = false;
+        this.shootTimer = 0.0;
+        this.reloading = false;
     }
 
-    SetSoundEffect(){
-        this.shotSound = new THREE.Audio(this.audioListner);
-        this.shotSound.setBuffer(this.shotSoundBuffer);
-        this.shotSound.setLoop(false);
-    }
-
-    AmmoPickup = (e) => {
-        this.ammo += 30;
-        this.uimanager.SetAmmo(this.magAmmo, this.ammo);
-    }
-
-    Initialize(){
-        const scene = this.model;
-        scene.scale.set(0.05, 0.05, 0.05);
-        scene.position.set(0.04, -0.02, 0.0);
-        scene.setRotationFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(5), THREE.MathUtils.degToRad(185), 0));
-
-        scene.traverse(child=>{
-            if(!child.isSkinnedMesh){
-                return;
-            }
-
-            child.receiveShadow = true;
-        });
-
-        this.camera.add(scene);
-
-        this.SetAnimations();
-        this.SetMuzzleFlash();
-        this.SetSoundEffect();
-
-        this.stateMachine = new WeaponFSM(this);
-        this.stateMachine.SetState('idle');
-
-        this.uimanager = this.FindEntity("UIManager").GetComponent("UIManager");
-        this.uimanager.SetAmmo(this.magAmmo, this.ammo);
-
-        this.SetupInput();
-
-        //Listen to ammo pickup event
-        this.parent.RegisterEventHandler(this.AmmoPickup, "AmmoPickup");
-    }
-
-    SetupInput(){
-        Input.AddMouseDownListner( e => {
-            if(e.button != 0 || this.reloading){
-                return;
-            }
-
-            this.shoot = true;
-            this.shootTimer = 0.0;
-        });
-
-        Input.AddMouseUpListner( e => {
-            if(e.button != 0){
-                return;
-            }
-
-            this.shoot = false;
-        });
-
-        Input.AddKeyDownListner(e => {
-            if(e.repeat) return;
-
-            if(e.code == "KeyR"){
-                this.Reload();
-            }
-        });
-    }
-
-    Reload(){
-        if(this.reloading || this.magAmmo == this.ammoPerMag || this.ammo == 0){
-            return;
+    Holster(){
+        if(this.flash.parent === this.root){
+            this.root.remove(this.flash);
         }
+        this.mesh.visible = false;
+        this.shoot = false;
+    }
 
+    RefreshUI(){
+        this.uimanager && this.uimanager.SetAmmo(this.magAmmo, this.ammo);
+    }
+
+    // ---- Reload ----
+    CanReload(){
+        return !(this.reloading || this.magAmmo == this.ammoPerMag || this.ammo == 0);
+    }
+
+    BeginReload(){
         this.reloading = true;
-        this.stateMachine.SetState('reload');
     }
 
     ReloadDone(){
@@ -137,9 +80,14 @@ export default class Weapon extends Component{
         const bulletsNeeded = this.ammoPerMag - this.magAmmo;
         this.magAmmo = Math.min(this.ammo + this.magAmmo, this.ammoPerMag);
         this.ammo = Math.max(0, this.ammo - bulletsNeeded);
-        this.uimanager.SetAmmo(this.magAmmo, this.ammo);
+        this.RefreshUI();
     }
 
+    AddAmmo(amount){
+        this.ammo += amount;
+    }
+
+    // ---- Firing ----
     Raycast(){
         const start = new THREE.Vector3(0.0, 0.0, -1.0);
         start.unproject(this.camera);
@@ -147,45 +95,42 @@ export default class Weapon extends Component{
         end.unproject(this.camera);
 
         const collisionMask = CollisionFilterGroups.AllFilter & ~CollisionFilterGroups.SensorTrigger;
-        
+
         if(AmmoHelper.CastRay(this.world, start, end, this.hitResult, collisionMask)){
             const ghostBody = Ammo.castObject( this.hitResult.collisionObject, Ammo.btPairCachingGhostObject );
-            const rigidBody = Ammo.castObject( this.hitResult.collisionObject, Ammo.btRigidBody ); 
+            const rigidBody = Ammo.castObject( this.hitResult.collisionObject, Ammo.btRigidBody );
             const entity = ghostBody.parentEntity || rigidBody.parentEntity;
-            
-            entity && entity.Broadcast({'topic': 'hit', from: this.parent, amount: this.damage, hitResult: this.hitResult});
+
+            entity && entity.Broadcast({'topic': 'hit', from: this.owner, amount: this.damage, hitResult: this.hitResult});
         }
     }
 
+    // Returns true if a shot was fired this frame so the manager can react.
     Shoot(t){
-        if(!this.shoot){
-            return;
+        if(!this.shoot || !this.magAmmo){
+            return false;
         }
 
-        if(!this.magAmmo){
-            //Reload automatically
-            this.Reload();
-            return;
-        }
+        let fired = false;
 
         if(this.shootTimer <= 0.0 ){
-            //Shoot
             this.flash.life = this.fireRate;
             this.flash.rotateZ(Math.PI * Math.random());
             const scale = Math.random() * (1.5 - 0.8) + 0.8;
             this.flash.scale.set(scale, 1, 1);
             this.shootTimer = this.fireRate;
             this.magAmmo = Math.max(0, this.magAmmo - 1);
-            this.uimanager.SetAmmo(this.magAmmo, this.ammo);
+            this.RefreshUI();
 
             this.Raycast();
-            this.Broadcast({topic: 'ak47_shot'});
-            
+
             this.shotSound.isPlaying && this.shotSound.stop();
             this.shotSound.play();
+            fired = true;
         }
 
         this.shootTimer = Math.max(0.0, this.shootTimer - t);
+        return fired;
     }
 
     AnimateMuzzle(t){
@@ -194,12 +139,4 @@ export default class Weapon extends Component{
         mat.opacity = ratio;
         this.flash.life = Math.max(0.0, this.flash.life - t);
     }
-
-    Update(t){
-        this.mixer.update(t);
-        this.stateMachine.Update(t);
-        this.Shoot(t);
-        this.AnimateMuzzle(t);
-    }
-
 }
