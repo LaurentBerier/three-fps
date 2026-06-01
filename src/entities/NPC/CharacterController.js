@@ -22,9 +22,26 @@ export default class CharacterController extends Component{
         this.path = [];
         this.tempRot = new THREE.Quaternion();
 
+        // Distance at which a waypoint counts as "reached". Kept generous because
+        // the agent moves via root motion and can't land precisely on a point;
+        // accepting waypoints early lets it round corners instead of orbiting them.
+        this.waypointRadius = 0.5;
+
+        // Stuck detection: if the agent is supposed to be following a path but
+        // stops making progress (e.g. wedged in a corner against a collision),
+        // we drop the current waypoint so it re-aims and frees itself.
+        this.stuckCheckPos = new THREE.Vector3();
+        this.stuckTimer = 0.0;
+        this.stuckCheckInterval = 0.5;
+        this.minProgressSq = 0.15 * 0.15;
+
         this.viewAngle = Math.cos(Math.PI / 4.0);
         this.maxViewDistance = 20.0 * 20.0;
         this.tempVec = new THREE.Vector3();
+        this.desiredPos = new THREE.Vector3();
+        this.clampTarget = new THREE.Vector3();
+        this.navGroup = null;
+        this.navNode = null;
         this.attackDistance = 2.2;
 
         this.canMove = true;
@@ -71,6 +88,13 @@ export default class CharacterController extends Component{
 
         this.SetupAnimations();
 
+        // Cache the navmesh group/node the agent starts on so we can clamp its
+        // movement to the mesh every frame (see ApplyRootMotion).
+        this.navGroup = this.navmesh.GetGroup(this.model.position);
+        if(this.navGroup !== null){
+            this.navNode = this.navmesh.GetClosestNode(this.model.position, this.navGroup);
+        }
+
         this.scene.add(scene);
         this.stateMachine.SetState('idle');
     }
@@ -113,6 +137,7 @@ export default class CharacterController extends Component{
 
     NavigateToRandomPoint(){
         const node = this.navmesh.GetRandomNode(this.model.position, 50);
+        if(!node){ return; }
         this.path = this.navmesh.FindPath(this.model.position, node);
     }
 
@@ -176,11 +201,12 @@ export default class CharacterController extends Component{
 
         const target = this.path[0].clone().sub( this.model.position );
         target.y = 0.0;
-       
-        if (target.lengthSq() > 0.1 * 0.1) {
+
+        if (target.lengthSq() > this.waypointRadius * this.waypointRadius) {
             target.normalize();
             this.tempRot.setFromUnitVectors(this.forwardVec, target);
-            this.model.quaternion.slerp(this.tempRot,4.0 * t);
+            // Turn briskly so the agent doesn't arc wide into walls on corners.
+            this.model.quaternion.slerp(this.tempRot, 8.0 * t);
         } else {
             // Remove node from the path we calculated
             this.path.shift();
@@ -197,6 +223,33 @@ export default class CharacterController extends Component{
         }
     }
 
+    // Detects when the agent is failing to make progress along its path and
+    // skips the blocking waypoint so it can re-aim and slide out of the corner.
+    CheckStuck(t){
+        // Only meaningful while we're actively trying to walk a path.
+        if(!this.canMove || !this.path?.length){
+            this.stuckTimer = 0.0;
+            this.stuckCheckPos.copy(this.model.position);
+            return;
+        }
+
+        this.stuckTimer += t;
+        if(this.stuckTimer < this.stuckCheckInterval){ return; }
+
+        const movedSq = this.stuckCheckPos.distanceToSquared(this.model.position);
+        this.stuckTimer = 0.0;
+        this.stuckCheckPos.copy(this.model.position);
+
+        if(movedSq >= this.minProgressSq){ return; }
+
+        // No real progress this interval: drop the current waypoint and target
+        // the next one. Emptying the path ends navigation just like arriving.
+        this.path.shift();
+        if(this.path.length === 0){
+            this.Broadcast({topic: 'nav.end', agent: this});
+        }
+    }
+
     ApplyRootMotion(){
         if(this.canMove){
             const vel = this.rootBone.position.clone();
@@ -206,7 +259,20 @@ export default class CharacterController extends Component{
             vel.applyQuaternion(this.model.quaternion);
 
             if(vel.lengthSq() < 0.1 * 0.1){
-                this.model.position.add(vel);
+                if(this.navNode && this.navGroup !== null){
+                    // Constrain the move to the navmesh so the agent can't clip
+                    // through collisions and wander off the walkable surface.
+                    this.desiredPos.copy(this.model.position).add(vel);
+                    this.navNode = this.navmesh.ClampStep(
+                        this.model.position, this.desiredPos, this.navNode, this.navGroup, this.clampTarget
+                    );
+                    // clampStep projects onto the mesh plane; keep the original
+                    // height so the enemy doesn't pop vertically.
+                    this.clampTarget.y = this.desiredPos.y;
+                    this.model.position.copy(this.clampTarget);
+                } else {
+                    this.model.position.add(vel);
+                }
             }
         }
 
@@ -222,6 +288,7 @@ export default class CharacterController extends Component{
 
         this.UpdateDirection();
         this.MoveAlongPath(t);
+        this.CheckStuck(t);
         this.stateMachine.Update(t);
 
         this.parent.SetRotation(this.model.quaternion);
